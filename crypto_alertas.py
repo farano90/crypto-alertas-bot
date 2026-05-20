@@ -1061,9 +1061,7 @@ async def monitorear_alertas(app: Application):
 
 
 async def _enviar_resumen_diario(app: Application):
-    usuarios = obtener_usuarios_aprobados()
-    if ADMIN_CHAT_ID not in usuarios:
-        usuarios.append(ADMIN_CHAT_ID)
+    usuarios = [ADMIN_CHAT_ID]
     for chat_id in usuarios:
         simbolos = obtener_simbolos_activos(chat_id)
         if not simbolos:
@@ -1091,10 +1089,7 @@ async def _enviar_noticias_diarias(app: Application):
     for i, n in enumerate(noticias, 1):
         lineas.append(f"{i}. [{n['titulo']}]({n['link']})")
     texto    = "\n".join(lineas)
-    usuarios = obtener_usuarios_aprobados()
-    if ADMIN_CHAT_ID not in usuarios:
-        usuarios.append(ADMIN_CHAT_ID)
-    for chat_id in usuarios:
+    for chat_id in [ADMIN_CHAT_ID]:
         try:
             await app.bot.send_message(
                 chat_id=chat_id, text=texto,
