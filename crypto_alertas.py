@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════════════╗
-║  BOT DE ALERTAS CRYPTO                                           ║
+║  BOT DE ALERTAS CRYPTO - VERSION PERSONAL                        ║
 ║  Creado por Emanuel Arano | IA & Trading                         ║
 ║  youtube.com/@EmanuelAranoIATrading                              ║
 ╠══════════════════════════════════════════════════════════════════╣
-║  Multi-usuario · Whitelist · % cambio · Charts · F&G · Noticias ║
+║  Uso personal · Un usuario · Charts · F&G · Noticias            ║
 ╚══════════════════════════════════════════════════════════════════╝
+
+INSTALACION:
+  pip install python-telegram-bot requests feedparser matplotlib
+
+CONFIGURACION:
+  TELEGRAM_BOT_TOKEN = tu token de @BotFather
+  ADMIN_CHAT_ID      = tu chat ID (obtenlo con @userinfobot)
+
+GitHub: github.com/farano90/crypto-alertas-bot
 
 Dependencias:
   pip install python-telegram-bot requests feedparser matplotlib
@@ -112,14 +121,6 @@ def _get_conn() -> sqlite3.Connection:
 def init_db():
     conn = _get_conn()
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            chat_id   TEXT PRIMARY KEY,
-            username  TEXT,
-            estado    TEXT NOT NULL DEFAULT 'pendiente',
-            creado    TEXT DEFAULT (datetime('now','localtime'))
-        )
-    """)
-    conn.execute("""
         CREATE TABLE IF NOT EXISTS alertas (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             chat_id     TEXT    NOT NULL DEFAULT '',
@@ -137,78 +138,38 @@ def init_db():
         )
     """)
     conn.commit()
-    _migrar(conn)
-    conn.close()
-    logger.info(f"Base de datos lista: {DB_PATH}")
-
-
-def _migrar(conn: sqlite3.Connection):
-    """Agrega columnas nuevas si la tabla ya existía con esquema anterior."""
+    # Migracion inline: agrega columnas nuevas si ya existia la tabla
     cols = {r[1] for r in conn.execute("PRAGMA table_info(alertas)").fetchall()}
     nuevas = {
-        "chat_id":      "TEXT NOT NULL DEFAULT ''",
-        "precio_base":  "REAL",
-        "porcentaje":   "REAL",
-        "recurrente":   "INTEGER NOT NULL DEFAULT 0",
-        "indicador":    "TEXT",
+        "chat_id":       "TEXT NOT NULL DEFAULT ''",
+        "precio_base":   "REAL",
+        "porcentaje":    "REAL",
+        "recurrente":    "INTEGER NOT NULL DEFAULT 0",
+        "indicador":     "TEXT",
         "condicion_ind": "TEXT",
-        "timeframe":    "TEXT",
+        "timeframe":     "TEXT",
     }
     for col, definition in nuevas.items():
         if col not in cols:
             conn.execute(f"ALTER TABLE alertas ADD COLUMN {col} {definition}")
     conn.commit()
+    conn.close()
+    logger.info(f"Base de datos lista: {DB_PATH}")
+
+
 
 
 # ── Usuarios ─────────────────────────────────────────────────────
 
-def registrar_usuario(chat_id: str, username: str) -> str:
-    """Inserta usuario si no existe. Devuelve estado actual o 'nuevo'."""
-    conn = _get_conn()
-    row = conn.execute("SELECT estado FROM usuarios WHERE chat_id = ?", (chat_id,)).fetchone()
-    if row:
-        conn.close()
-        return row["estado"]
-    conn.execute(
-        "INSERT INTO usuarios (chat_id, username, estado) VALUES (?, ?, 'pendiente')",
-        (chat_id, username or ""),
-    )
-    conn.commit()
-    conn.close()
-    return "nuevo"
 
 
-def obtener_estado_usuario(chat_id: str) -> str | None:
-    conn = _get_conn()
-    row = conn.execute("SELECT estado FROM usuarios WHERE chat_id = ?", (chat_id,)).fetchone()
-    conn.close()
-    return row["estado"] if row else None
 
 
-def aprobar_usuario(chat_id: str) -> bool:
-    conn = _get_conn()
-    cur = conn.execute("UPDATE usuarios SET estado = 'aprobado' WHERE chat_id = ?", (chat_id,))
-    conn.commit()
-    conn.close()
-    return cur.rowcount > 0
 
 
-def rechazar_usuario(chat_id: str) -> bool:
-    conn = _get_conn()
-    cur = conn.execute("UPDATE usuarios SET estado = 'rechazado' WHERE chat_id = ?", (chat_id,))
-    conn.commit()
-    conn.close()
-    return cur.rowcount > 0
 
 
-def obtener_usuarios_aprobados() -> list[str]:
-    conn = _get_conn()
-    rows = conn.execute("SELECT chat_id FROM usuarios WHERE estado = 'aprobado'").fetchall()
-    conn.close()
-    return [r["chat_id"] for r in rows]
 
-
-# ── Alertas ───────────────────────────────────────────────────────
 
 def insertar_alerta(chat_id: str, symbol: str, exchange: str, tipo: str,
                     precio: float = 0.0, precio_base: float | None = None,
@@ -489,24 +450,15 @@ def obtener_noticias(limit: int = 5) -> list[dict]:
 # ════════════════════════════════════════════════════════════════
 
 async def verificar_acceso(update: Update) -> bool:
+    """Solo el dueno del bot puede usarlo (uso personal)."""
     chat_id = str(update.effective_chat.id)
     if chat_id == ADMIN_CHAT_ID:
         return True
-    estado = obtener_estado_usuario(chat_id)
-    if estado == "aprobado":
-        return True
-    if estado == "pendiente":
-        await update.message.reply_text(
-            "⏳ Tu solicitud está *pendiente de aprobación*. Te avisamos cuando el admin te apruebe.",
-            parse_mode="Markdown",
-        )
-    elif estado == "rechazado":
-        await update.message.reply_text("❌ Tu solicitud fue *rechazada*.", parse_mode="Markdown")
-    else:
-        await update.message.reply_text(
-            "🔒 No tenés acceso.\nUsá /solicitar para pedir acceso al bot.",
-            parse_mode="Markdown",
-        )
+    await update.message.reply_text(
+        "Este bot es de uso personal.\n"
+        "Si quieres tu propio bot visita:\n"
+        "youtube.com/@EmanuelAranoIATrading"
+    )
     return False
 
 
@@ -515,106 +467,27 @@ async def verificar_acceso(update: Update) -> bool:
 # ════════════════════════════════════════════════════════════════
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    es_admin = str(update.effective_chat.id) == ADMIN_CHAT_ID
+    if not await verificar_acceso(update):
+        return
     texto = (
-        "👋 *Bienvenido al Bot de Alertas Crypto*\n\n"
-        "📡 Monitoreo en tiempo real desde *Binance* y *Bybit*\n"
-        "💾 Alertas persistentes en SQLite\n\n"
-        "📋 *Comandos:*\n"
-        "• /solicitar — Pedir acceso al bot\n"
+        "👋 *Bot de Alertas Crypto - Uso Personal*\n\n"
+        "📡 Monitoreo en tiempo real desde *Binance* y *Bybit*\n\n"
+        "📋 *Comandos disponibles:*\n"
         "• /agregar — Nueva alerta de precio o indicador\n"
         "• /listar — Ver alertas activas\n"
         "• /eliminar `<ID>` — Eliminar una alerta\n"
         "• /precio `BTCUSDT` — Precio actual\n"
-        "• /miedo — Índice Fear & Greed\n"
-        "• /noticias — Últimas noticias crypto\n"
+        "• /miedo — Indice Fear and Greed\n"
+        "• /noticias — Ultimas noticias crypto\n"
+        "• /cancelar — Cancelar operacion actual\n"
     )
-    if es_admin:
-        texto += "\n🛠️ *Admin:*\n• /usuarios — Gestionar solicitudes de acceso\n"
     await update.message.reply_text(texto, parse_mode="Markdown")
 
 
-async def cmd_solicitar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    chat_id  = str(update.effective_chat.id)
-    username = update.effective_user.username or update.effective_user.first_name or "desconocido"
-
-    if chat_id == ADMIN_CHAT_ID:
-        await update.message.reply_text("Sos el administrador, ya tenés acceso total.")
-        return
-
-    estado = registrar_usuario(chat_id, username)
-
-    mensajes = {
-        "aprobado":  "✅ Ya tenés acceso. Usá /start para ver los comandos.",
-        "pendiente": "⏳ Ya tenés una solicitud pendiente. Esperá la aprobación.",
-        "rechazado": "❌ Tu solicitud fue rechazada. Contactá al administrador.",
-    }
-    if estado in mensajes:
-        await update.message.reply_text(mensajes[estado])
-        return
-
-    # estado == "nuevo"
-    await update.message.reply_text(
-        "📬 *Solicitud enviada.* El administrador la revisará pronto.",
-        parse_mode="Markdown",
-    )
-    teclado = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Aprobar", callback_data=f"aprobar:{chat_id}"),
-        InlineKeyboardButton("❌ Rechazar", callback_data=f"rechazar:{chat_id}"),
-    ]])
-    await ctx.bot.send_message(
-        chat_id=ADMIN_CHAT_ID,
-        text=f"🔔 *Nueva solicitud de acceso*\n\n👤 @{username}\n🆔 `{chat_id}`",
-        reply_markup=teclado,
-        parse_mode="Markdown",
-    )
 
 
-async def callback_aprobacion(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if str(query.from_user.id) != ADMIN_CHAT_ID:
-        return
-    accion, chat_id = query.data.split(":", 1)
-    if accion == "aprobar":
-        aprobar_usuario(chat_id)
-        await query.edit_message_text(f"✅ Usuario `{chat_id}` aprobado.", parse_mode="Markdown")
-        try:
-            await ctx.bot.send_message(
-                chat_id=chat_id,
-                text="✅ *¡Tu acceso fue aprobado!*\nEscribí /start para comenzar.",
-                parse_mode="Markdown",
-            )
-        except Exception:
-            pass
-    else:
-        rechazar_usuario(chat_id)
-        await query.edit_message_text(f"❌ Usuario `{chat_id}` rechazado.", parse_mode="Markdown")
-        try:
-            await ctx.bot.send_message(
-                chat_id=chat_id, text="❌ Tu solicitud fue *rechazada*.", parse_mode="Markdown"
-            )
-        except Exception:
-            pass
 
 
-async def cmd_usuarios(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_chat.id) != ADMIN_CHAT_ID:
-        return
-    conn = _get_conn()
-    rows = conn.execute(
-        "SELECT chat_id, username, estado, creado FROM usuarios ORDER BY creado DESC LIMIT 20"
-    ).fetchall()
-    conn.close()
-    if not rows:
-        await update.message.reply_text("No hay usuarios registrados.")
-        return
-    emojis = {"aprobado": "✅", "pendiente": "⏳", "rechazado": "❌"}
-    lineas = ["👥 *Usuarios registrados:*\n"]
-    for r in rows:
-        e = emojis.get(r["estado"], "❓")
-        lineas.append(f"{e} @{r['username'] or '?'} | `{r['chat_id']}` | {r['estado']}")
-    await update.message.reply_text("\n".join(lineas), parse_mode="Markdown")
 
 
 async def cmd_miedo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1261,15 +1134,12 @@ def main():
     )
 
     app.add_handler(CommandHandler("start",     cmd_start))
-    app.add_handler(CommandHandler("solicitar", cmd_solicitar))
-    app.add_handler(CommandHandler("usuarios",  cmd_usuarios))
     app.add_handler(CommandHandler("listar",    cmd_listar))
     app.add_handler(CommandHandler("eliminar",  cmd_eliminar))
     app.add_handler(CommandHandler("precio",    cmd_precio))
     app.add_handler(CommandHandler("miedo",     cmd_miedo))
     app.add_handler(CommandHandler("noticias",  cmd_noticias))
     app.add_handler(conv)
-    app.add_handler(CallbackQueryHandler(callback_aprobacion, pattern="^(aprobar|rechazar):"))
 
     async def post_init(application: Application):
         asyncio.create_task(monitorear_alertas(application))
